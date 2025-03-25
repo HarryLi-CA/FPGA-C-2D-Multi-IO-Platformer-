@@ -24,17 +24,36 @@ short int Buffer2[240][512];
 
 int mouseX = 0; int mouseY = 0;
 
-#define playerSpriteRows 6
-#define playerSpriteCols 4
-int playerSprite[playerSpriteRows][playerSpriteCols] = {
-    {0x0, 0x0, 0x0, 0x0},
-    {0x0, 0x0, 0x0, 0x0},
-    {0x0, 0x0, 0x0, 0x0},
-    {0x0, 0x0, 0x0, 0x10000},
-    {0x0, 0x0, 0x0, 0x10000},
-    {0x0, 0x0, 0x0, 0x10000},
+#define playerSpriteRows 8
+#define playerSpriteCols 8
+const int playerSprite[playerSpriteRows][playerSpriteCols] = {
+    // Row 1: Top border (black outline)
+    {0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000},
+    // Row 2: Circuit design
+    {0x0000, 0x07E0, 0x07E0, 0x07FF, 0x07E0, 0x07E0, 0x07E0, 0x0000},
+    // Row 3: Circuit design
+    {0x0000, 0x07E0, 0xFFE0, 0x07E0, 0x07E0, 0x07FF, 0x07E0, 0x0000},
+    // Row 4: Circuit design
+    {0x0000, 0x07FF, 0x07E0, 0x07E0, 0x07E0, 0x07E0, 0xFFE0, 0x0000},
+    // Row 5: Circuit design
+    {0x0000, 0x07E0, 0x07E0, 0x07FF, 0x07E0, 0x07E0, 0x07E0, 0x0000},
+    // Row 6: Circuit design
+    {0x0000, 0x07E0, 0xFFE0, 0x07E0, 0x07FF, 0x07E0, 0x07E0, 0x0000},
+    // Row 7: Circuit design
+    {0x0000, 0x07E0, 0x07E0, 0x07E0, 0x07E0, 0xFFE0, 0x07E0, 0x0000},
+    // Row 8: Bottom border (black outline)
+    {0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000}
 };
 
+#define mouseSpriteRows 5
+#define mouseSpriteCols 4
+const int mouseSprite[mouseSpriteRows][mouseSpriteCols] = {
+    {0x10000, 0x07E0, 0x10000, 0x10000}, // Transparent, Green, Transparent, Transparent
+    {0x07E0, 0x07E0, 0x07E0, 0x10000},    // Green, Green, Green, Transparent
+    {0x10000, 0x07E0, 0xFFE0, 0x07FF},    // Transparent, Green, Yellow, Cyan
+    {0x10000, 0x10000, 0x07FF, 0x07E0},  // Transparent, Transparent, Cyan, Green
+    {0x10000, 0x10000, 0x10000, 0x07E0} // Transparent, Transparent, Transparent, Green
+};
 
 struct audio_t {
     volatile unsigned int control; // The control/status register
@@ -80,6 +99,7 @@ struct keyStates
     bool leftPressed;
     bool rightPressed;
 };
+
 enum KeyCode{
     NOKEY,
     LEFT,
@@ -89,7 +109,7 @@ enum KeyCode{
 };
 
 
-
+// Handle the key states, and update the current key state
 void handle_key_states(enum KeyCode key, bool isPress, struct keyStates* currentKeyState){
     switch (key)
     {
@@ -110,9 +130,10 @@ void handle_key_states(enum KeyCode key, bool isPress, struct keyStates* current
     }
 }
 
+// Handle the PS2 input, and update the key states, and mouse position, initial template from DE1-SoC Documentation
 void handle_ps2(volatile int* currentPS2, struct bytePacket* bP, int* byteCounter, struct keyStates* currentKeyState){
     PS2_data = *(currentPS2); // read the Data register in the PS/2 port
-    RVALID = PS2_data & 0x8000; // extract the RVALID field
+    RVALID = PS2_data & 0x8000; // seek if the data is valid
     if (RVALID) {
     /* shift the next data byte into the display */
     *byteCounter++;
@@ -320,6 +341,28 @@ void wait_for_vsync()
 	}
 }
 
+// FUNCTION MADE BY GITHUB COPILOT FOR DEBUGGING PURPOSES
+void integerToHEX(int value){
+    volatile int * HEX3_HEX0_ptr = (int *)HEX3_HEX0_BASE;
+    volatile int * HEX5_HEX4_ptr = (int *)HEX5_HEX4_BASE;
+    unsigned char seven_seg_decode_table[] = {
+        0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07,
+        0x7F, 0x67, 0x77, 0x7C, 0x39, 0x5E, 0x79, 0x71};
+    unsigned char hex_segs[] = {0, 0, 0, 0, 0, 0, 0, 0};
+    unsigned int shift_buffer, nibble;
+    unsigned char code;
+    int i;
+    shift_buffer = value;
+    for (i = 0; i < 8; ++i) {
+        nibble = shift_buffer & 0x0000000F; // character is in rightmost nibble
+        code = seven_seg_decode_table[nibble];
+        hex_segs[i] = code;
+        shift_buffer = shift_buffer >> 4;
+    }
+    *(HEX3_HEX0_ptr) = *(int *)(hex_segs);
+    *(HEX5_HEX4_ptr) = *(int *)(hex_segs + 4);
+}
+
 int main(void)
 {
     *(PS2_ptr) = 0xFF; // reset
@@ -384,7 +427,7 @@ int main(void)
         /* Erase any boxes and lines that were drawn in the last iteration */
         
 		for(int i = 0; i < 8; i++){
-			draw_sprite(x[i], y[i], 6, 4, playerSprite, true);
+			draw_sprite(x[i], y[i], playerSpriteRows, playerSpriteCols, playerSprite, true);
 			draw_line(x[(i+1)%8],  y[(i+1)%8],  x[i],  y[i], back_color);
 		}
 
@@ -415,11 +458,13 @@ int main(void)
             ledValue = ledValue | 0x8;
         }
         *LEDR_ptr = ledValue;
+        integerToHEX(ledValue);
 
-        draw_sprite(mouseX, mouseY, 6, 4, playerSprite, false);
+        draw_sprite(mouseX, mouseY, mouseSpriteRows, mouseSpriteCols, mouseSprite, false);
+        
         // code for drawing the boxes and lines (not shown)
 		for(int i = 0; i < 8; i++){
-			draw_sprite(x[i], y[i], 6, 4, playerSprite, false);
+			draw_sprite(x[i], y[i], playerSpriteRows, playerSpriteCols, playerSprite, false);
 			draw_line( x[(i+1)%8],  y[(i+1)%8],  x[i],  y[i], 0x001F);
 		}
 
