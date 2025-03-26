@@ -117,6 +117,7 @@ struct audio_t {
 
 struct audio_t* audiofr = (struct audio_t*) AUDIO_BASE;
 
+
 void clear_screen();
 void draw_line(int x0, int y0, int x1, int y1, short int line_color);
 
@@ -435,6 +436,25 @@ void integerToHEX(int value){
     *(HEX5_HEX4_ptr) = *(int *)(hex_segs + 4);
 }
 
+void update_ball_jump() {
+    int audioVal = audio_value();
+    if (!ballJumping && audioVal > JUMP_THRESHOLD) {
+        ballObject.velocity.y = BALL_JUMP_SPEED;
+        ballJumping = 1;
+    }
+
+    if (ballJumping) {
+        ballObject.position.y += ballObject.velocity.y;
+        ballObject.velocity.y += BALL_GRAVITY;
+
+        if (ballObject.position.y >= BALL_BASE_Y) {
+            ballObject.position.y = BALL_BASE_Y;
+            ballObject.velocity.y = 0;
+            ballJumping = 0;
+        }
+    }
+}
+
 int main(void)
 {
     *(PS2_ptr) = 0xFF; // reset
@@ -608,6 +628,25 @@ int main(void)
         
         play_audio(&curAudio);
 
+	draw_sprite(&ballObject, true);    
+        
+        //collison logic
+        if (ballObject.position.x <= enemy1.position.x + enemy1.dimensions.x ||
+            ballObject.position.x + ballObject.dimensions.x >= enemy1.position.x){
+		ballObject.velocity.y=0
+		ballOnject.velocity.x=0
+			}
+        
+	if(ballObject.position.y <= enemy1.position.y + enemy1.dimensions.y ||
+            ballObject.position.y + ballObject.dimensions.y >= enemy1.position.y) {
+		ballObject.velocity.x=0
+		ballObject.velocity.y=0
+	\
+            
+        }
+       
+
+
         //end logic
         draw_sprite(&enemy1, false);
         draw_sprite(&player1, false);
@@ -621,6 +660,12 @@ int main(void)
 		*(pixel_ctrl_ptr) = (int) &Buffer1;
 		*(pixel_ctrl_ptr + 1) = (int) &Buffer2;
 		}
+	    
+	draw_sprite(&ballObject, true);     //removed the gameobject from old postion
+	update_ball_jump();                // audios input logic update
+	draw_sprite(&ballObject, false);   // draw new gameobject
+
+	    
         wait_for_vsync(); // swap front and back buffers on VGA vertical sync
         pixel_buffer_start = *(pixel_ctrl_ptr + 1); // new back buffer
     
