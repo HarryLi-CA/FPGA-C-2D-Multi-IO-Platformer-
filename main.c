@@ -12,7 +12,7 @@ int * const AUDIO_BASE = (int *)0xFF203040;
 int * const SWITCH_BASE = (int *)0xFF200040;
 int * const LEDR_BASE = (int *)0xFF200000;
 
-const int JUMP_AUDIO_DELAY = 1500;
+const int JUMP_AUDIO_DELAY = 500;
 
 const int HIGH_AUDIO = 0x7FFFFFFF; // 24-bit max value
 const int LOW_AUDIO = 0x000000;  // low value
@@ -21,7 +21,7 @@ const int LOW_AUDIO = 0x000000;  // low value
 #define SCREEN_HEIGHT 240
 
 
-short back_color = 0xffff;
+short back_color = 0xefdf;
 
 volatile int pixel_buffer_start; // global variable
 short int Buffer1[240][512]; // 240 rows, 512 (320 + padding) columns
@@ -40,7 +40,7 @@ struct sprite_t
 
 #define playerSpriteRows 8
 #define playerSpriteCols 8
-#define playerScaling 3
+#define playerScaling 2
 const int playerImage[playerSpriteRows][playerSpriteCols] = {
     // Row 1: Top border (black outline)
     {0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000},
@@ -93,12 +93,16 @@ struct gameObject{
     struct vector2 position;
     struct vector2 velocity;
     struct vector2 acceleration;
+    struct vector2 dimensions;
     const struct sprite_t* sprite;
     bool isFixedToScreen;
+    bool isCollidable;
+    bool isStatic;
+    bool isPlayer;
 };
 
-static struct gameObject mouseObject = {{100, 100}, {0, 0}, {0, 0}, &mouse, true};
-static struct gameObject screenObject = {{0, 0}, {0, 0}, {0, 0}, NULL, true};
+static struct gameObject mouseObject = {{100, 100}, {0, 0}, {0, 0}, {0, 0}, &mouse, true};
+static struct gameObject screenObject = {{0, 0}, {0, 0}, {0, 0}, {0, 0}, NULL, true};
 
 
 struct audio_t {
@@ -120,8 +124,6 @@ void draw_box(int x, int y, short int line_color);
 
 void wait_for_vsync();
 
-
-void play_audio(int delay);
 
 int counter = 0;
 
@@ -149,7 +151,8 @@ enum KeyCode{
     LEFT,
     RIGHT,
     UP,
-    DOWN
+    DOWN,
+    ESC,
 };
 
 
@@ -168,6 +171,9 @@ void handle_key_states(const enum KeyCode key, const bool isPress, struct keySta
         break;
     case DOWN:
         currentKeyState->downPressed = isPress;
+        break;
+    case ESC:
+        currentKeyState->exitPressed = isPress;
         break;
     default:
         break;
@@ -216,9 +222,17 @@ void handle_ps2(volatile int* currentPS2, struct bytePacket* bP, struct keyState
                 break;
             }
             break;
-        
         default:
-            curKey = NOKEY;
+            switch (byte3)
+            {
+            case 0x76:
+                curKey = ESC;
+                break;
+            
+            default:
+                curKey = NOKEY;
+                break;
+            }
             break;
         }
         if(curKey == NOKEY)
@@ -270,8 +284,10 @@ int audio_value(){
         return 0;
 }
 
-void play_audio(int delay){
-    int half_period = JUMP_AUDIO_DELAY;
+void play_audio(const int* delay){
+    if(*delay <= 0)
+        return;
+    int half_period = *delay;
     int space_right  = (audiofr ->wsrc & 0xFF);
     int space_left = (audiofr ->wslc& 0xFF);
     int amp = HIGH_AUDIO;
@@ -447,12 +463,16 @@ int main(void)
     currentKeyState.rightPressed = false;
 
     struct gameObject player1;
-    player1.position.x = rand()%318 + 1;
-    player1.position.y = rand()%238 + 1;
-    player1.velocity.x = (rand()%2)*2-1;
-    player1.velocity.y = (rand()%2)*2-1;
     player1.sprite = &player;
+    player1.dimensions.x = player1.sprite->width * player1.sprite->scaling;
+    player1.dimensions.y = player1.sprite->height * player1.sprite->scaling;
     player1.isFixedToScreen = false;
+
+    struct gameObject enemy1;
+    enemy1.sprite = &player;
+    enemy1.dimensions.x = enemy1.sprite->width * enemy1.sprite->scaling;
+    enemy1.dimensions.y = enemy1.sprite->height * enemy1.sprite->scaling;
+    enemy1.isFixedToScreen = false;
 
     /* set front pixel buffer to Buffer 1 */
     *(pixel_ctrl_ptr + 1) = (int) &Buffer1; // first store the address in the  back buffer
@@ -467,7 +487,11 @@ int main(void)
     *(pixel_ctrl_ptr + 1) = (int) &Buffer2;
     pixel_buffer_start = *(pixel_ctrl_ptr + 1); // we draw on the back buffer
     clear_screen(); // pixel_buffer_start points to the pixel buffer
-	
+	currentKeyState.exitPressed = true;
+
+    int jumpAudioCounter = 0;
+    int curAudio = 0;
+
 	//short int line_color = 0x0;
     while (1)
     {
@@ -481,21 +505,16 @@ int main(void)
                 audioVal /= HIGH_AUDIO;
                 *LEDR_ptr = audioVal;
             }
-            play_audio(JUMP_AUDIO_DELAY);
         }
 
+
         draw_sprite(&player1, true);
+        draw_sprite(&enemy1, true);
+        draw_sprite(&mouseObject, true);
 
         //start logic
         handle_ps2(PS2_BASE, &ps2BytePacket1, &currentKeyState);
         handle_ps2(PS2_BASE2, &ps2BytePacket2, &currentKeyState);
-        player1.position.x += player1.velocity.x;
-        player1.position.y += player1.velocity.y;
-
-        if(player1.position.x <= 0 || player1.position.x >=320)
-            player1.velocity.x *=-1;
-        if(player1.position.y <= 0 || player1.position.y >=239)
-            player1.velocity.y *=-1;
 
         int ledValue = 0;
         if(currentKeyState.upPressed){
@@ -506,20 +525,91 @@ int main(void)
             ledValue = ledValue | 0x2;
         }
         if(currentKeyState.leftPressed){
-            screenObject.position.x -= 1;
+            player1.velocity.x = -1;
             ledValue = ledValue | 0x4;
         }
         if(currentKeyState.rightPressed){
-            screenObject.position.x += 1;
+            player1.velocity.x = 1;
             ledValue = ledValue | 0x8;
+        }
+
+
+        if(currentKeyState.exitPressed){
+            player1.position.x = 10;
+            player1.position.y = 0;
+            player1.velocity.x = 0;
+            player1.velocity.y = 0;
+            player1.acceleration.y = 1;
+
+            enemy1.position.x = 100;
+            enemy1.position.y = 0;
+            enemy1.velocity.x = 0;
+            enemy1.velocity.y = 0;
+            enemy1.acceleration.y = 1;
+
+            screenObject.position.x = 0;
+
+            currentKeyState.exitPressed = false;
+            clear_screen();
+        }
+
+        if(currentKeyState.upPressed){
+            player1.velocity.y = -10;
+            currentKeyState.upPressed = false;
+            curAudio = JUMP_AUDIO_DELAY;
+            jumpAudioCounter = 100;
+        }
+        if(jumpAudioCounter > 0){
+            jumpAudioCounter--;
+            curAudio = JUMP_AUDIO_DELAY;
+        }
+        else{
+            curAudio = 0;
+        }
+
+        if (!(currentKeyState.rightPressed ^ currentKeyState.leftPressed))
+        {
+            player1.velocity.x = 0;
+        }
+        else if(currentKeyState.leftPressed){
+            player1.velocity.x = -5;
+        }
+        else if(currentKeyState.rightPressed){
+            player1.velocity.x = 5;
         }
         *LEDR_ptr = ledValue;
         integerToHEX(ledValue);
 
+        player1.position.x += player1.velocity.x;
+        player1.velocity.y += player1.acceleration.y;
+        player1.position.y += player1.velocity.y;
+
+        enemy1.position.x += enemy1.velocity.x;
+        enemy1.velocity.y += enemy1.acceleration.y;
+        enemy1.position.y += enemy1.velocity.y;
+
+        if(player1.position.x + player1.dimensions.x - screenObject.position.x > SCREEN_WIDTH-10){
+            screenObject.position.x = player1.position.x + player1.dimensions.x  - SCREEN_WIDTH + 10;
+        }
+        else if(player1.position.x - screenObject.position.x < 10){
+            screenObject.position.x = player1.position.x - 10;
+        }
+
+        if(player1.position.y >= 200){
+            player1.position.y = 200;
+            player1.velocity.y = 0;
+        }
+        if(enemy1.position.y >= 200){
+            enemy1.position.y = 200;
+            enemy1.velocity.y = 0;
+        }
+
 
         
+        play_audio(&curAudio);
 
         //end logic
+        draw_sprite(&enemy1, false);
         draw_sprite(&player1, false);
         draw_sprite(&mouseObject, false);
 
